@@ -16,7 +16,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.util.MovingObjectPosition.MovingObjectType;
 
 public class AutoTool extends Module {
-   private static final Minecraft mc = Minecraft.func_71410_x();
+   private static final Minecraft mc = Minecraft.getMinecraft();
    private int currentToolSlot = -1;
    private int previousSlot = -1;
    private int tickDelayCounter = 0;
@@ -39,8 +39,8 @@ public class AutoTool extends Module {
 
    private int findShearsSlot() {
       for(int i = 0; i < 9; ++i) {
-         ItemStack stack = mc.field_71439_g.field_71071_by.func_70301_a(i);
-         if (stack != null && stack.func_77973_b() instanceof ItemShears) {
+         ItemStack stack = mc.thePlayer.inventory.getStackInSlot(i);
+         if (stack != null && stack.getItem() instanceof ItemShears) {
             return i;
          }
       }
@@ -51,21 +51,21 @@ public class AutoTool extends Module {
    @EventTarget
    public void onTick(TickEvent event) {
       if (this.isEnabled() && event.getType() == EventType.PRE) {
-         if (this.currentToolSlot != -1 && this.currentToolSlot != mc.field_71439_g.field_71071_by.field_70461_c) {
+         if (this.currentToolSlot != -1 && this.currentToolSlot != mc.thePlayer.inventory.currentItem) {
             this.currentToolSlot = -1;
             this.previousSlot = -1;
          }
 
-         if (mc.field_71476_x != null && mc.field_71476_x.field_72313_a == MovingObjectType.BLOCK && mc.field_71474_y.field_74312_F.func_151470_d() && !mc.field_71439_g.func_71039_bw() && !this.isKillAura()) {
-            if (mc.field_71441_e.func_180495_p(mc.field_71476_x.func_178782_a()).func_177230_c() == Blocks.field_150325_L) {
-               if (this.tickDelayCounter >= (Integer)this.switchDelay.getValue() && (!(Boolean)this.sneakOnly.getValue() || KeyBindUtil.isKeyDown(mc.field_71474_y.field_74311_E.func_151463_i()))) {
+         if (mc.objectMouseOver != null && mc.objectMouseOver.typeOfHit == MovingObjectType.BLOCK && mc.gameSettings.keyBindAttack.isKeyDown() && !mc.thePlayer.isUsingItem() && !this.isKillAura()) {
+            if (mc.theWorld.getBlockState(mc.objectMouseOver.getBlockPos()).getBlock() == Blocks.leaves) {
+               if (this.tickDelayCounter >= (Integer)this.switchDelay.getValue() && (!(Boolean)this.sneakOnly.getValue() || KeyBindUtil.isKeyDown(mc.gameSettings.keyBindSneak.getKeyCode()))) {
                   int slot = this.findShearsSlot();
-                  if (slot != -1 && mc.field_71439_g.field_71071_by.field_70461_c != slot) {
+                  if (slot != -1 && mc.thePlayer.inventory.currentItem != slot) {
                      if (this.previousSlot == -1) {
-                        this.previousSlot = mc.field_71439_g.field_71071_by.field_70461_c;
+                        this.previousSlot = mc.thePlayer.inventory.currentItem;
                      }
 
-                     mc.field_71439_g.field_71071_by.field_70461_c = this.currentToolSlot = slot;
+                     mc.thePlayer.inventory.currentItem = this.currentToolSlot = slot;
                   }
                }
 
@@ -75,7 +75,7 @@ public class AutoTool extends Module {
             }
          } else {
             if ((Boolean)this.switchBack.getValue() && this.previousSlot != -1) {
-               mc.field_71439_g.field_71071_by.field_70461_c = this.previousSlot;
+               mc.thePlayer.inventory.currentItem = this.previousSlot;
             }
 
             this.currentToolSlot = -1;
