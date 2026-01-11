@@ -18,13 +18,17 @@ import net.minecraft.util.Vec3;
 
 public class HitSelect extends Module {
     private static final Minecraft mc = Minecraft.getMinecraft();
-    
+
+    // Mode property for selecting hit prioritization strategy
     public final ModeProperty mode = new ModeProperty("mode", 0, new String[]{"SECOND", "CRITICALS", "W_TAP"});
-    
+
+    // State variables for sprinting and motion manipulation
     private boolean sprintState = false;
-    private boolean set = false;
-    private double savedSlowdown = 0.0;
-    
+    private boolean set = false; // Flag to track if motion has been fixed
+    private double savedSlowdown = 0.0; // Saved slowdown value from KeepSprint
+    private boolean keepSprintToggled = false; // Track if we toggled KeepSprint ourselves
+
+    // Counters for debugging/analytics (optional, can be used for logging)
     private int blockedHits = 0;
     private int allowedHits = 0;
 
@@ -32,23 +36,30 @@ public class HitSelect extends Module {
         super("HitSelect", false);
     }
 
+    /**
+     * Handles update events, resetting motion in POST phase.
+     */
     @EventTarget
     public void onUpdate(UpdateEvent event) {
         if (!this.isEnabled()) {
             return;
         }
-        
+
         if (event.getType() == EventType.POST) {
             this.resetMotion();
         }
     }
 
+    /**
+     * Intercepts packets to control attack hits based on the selected mode.
+     */
     @EventTarget(Priority.HIGHEST)
     public void onPacket(PacketEvent event) {
         if (!this.isEnabled() || event.getType() != EventType.SEND || event.isCancelled()) {
             return;
         }
 
+        // Track sprint state from entity action packets
         if (event.getPacket() instanceof C0BPacketEntityAction) {
             C0BPacketEntityAction packet = (C0BPacketEntityAction) event.getPacket();
             switch (packet.getAction()) {
@@ -62,9 +73,10 @@ public class HitSelect extends Module {
             return;
         }
 
+        // Handle attack packets
         if (event.getPacket() instanceof C02PacketUseEntity) {
             C02PacketUseEntity use = (C02PacketUseEntity) event.getPacket();
-            
+
             if (use.getAction() != C02PacketUseEntity.Action.ATTACK) {
                 return;
             }
@@ -81,14 +93,15 @@ public class HitSelect extends Module {
             EntityLivingBase living = (EntityLivingBase) target;
             boolean allow = true;
 
+            // Determine if hit is allowed based on mode
             switch (this.mode.getValue()) {
-                case 0: // SECOND
+                case 0: // SECOND: Prioritize second hits
                     allow = this.prioritizeSecondHit(mc.thePlayer, living);
                     break;
-                case 1: // CRITICALS
+                case 1: // CRITICALS: Allow only critical hits
                     allow = this.prioritizeCriticalHits(mc.thePlayer);
                     break;
-                case 2: // WTAP
+                case 2: // W_TAP: Prioritize W-tap hits
                     allow = this.prioritizeWTapHits(mc.thePlayer, this.sprintState);
                     break;
             }
@@ -102,24 +115,27 @@ public class HitSelect extends Module {
         }
     }
 
+    /**
+     * Checks if a second hit should be prioritized.
+     */
     private boolean prioritizeSecondHit(EntityLivingBase player, EntityLivingBase target) {
-        // If target is already hurt, allow the hit
+        // Allow if target is already hurt
         if (target.hurtTime != 0) {
             return true;
         }
 
-        // If player hasn't recovered from hurt time, allow the hit
+        // Allow if player hasn't recovered from hurt time
         if (player.hurtTime <= player.maxHurtTime - 1) {
             return true;
         }
 
-        // If too close, allow the hit
+        // Allow if too close
         double dist = player.getDistanceToEntity(target);
         if (dist < 2.5) {
             return true;
         }
 
-        // If not moving towards each other, allow the hit
+        // Allow if not moving towards each other
         if (!this.isMovingTowards(target, player, 60.0)) {
             return true;
         }
@@ -128,53 +144,62 @@ public class HitSelect extends Module {
             return true;
         }
 
-        // Block the hit and fix motion
+        // Block and fix motion
         this.fixMotion();
         return false;
     }
 
+    /**
+     * Checks if a critical hit should be prioritized.
+     */
     private boolean prioritizeCriticalHits(EntityLivingBase player) {
-        // If on ground, allow the hit
+        // Allow if on ground
         if (player.onGround) {
             return true;
         }
 
-        // If hurt, allow the hit
+        // Allow if hurt
         if (player.hurtTime != 0) {
             return true;
         }
 
-        // If falling, allow the hit (for crits)
+        // Allow if falling (potential crit)
         if (player.fallDistance > 0.0f) {
             return true;
         }
 
-        // Block the hit and fix motion
+        // Block and fix motion
         this.fixMotion();
         return false;
     }
 
+    /**
+     * Checks if a W-tap hit should be prioritized.
+     */
     private boolean prioritizeWTapHits(EntityLivingBase player, boolean sprinting) {
-        // If against wall, allow the hit
+        // Allow if against wall
         if (player.isCollidedHorizontally) {
             return true;
         }
 
-        // If not moving forward, allow the hit
+        // Allow if not moving forward
         if (!mc.gameSettings.keyBindForward.isKeyDown()) {
             return true;
         }
 
-        // If already sprinting, allow the hit
+        // Allow if already sprinting
         if (sprinting) {
             return true;
         }
 
-        // Block the hit and fix motion
+        // Block and fix motion
         this.fixMotion();
         return false;
     }
 
+    /**
+     * Fixes motion by enabling KeepSprint and setting slowdown to 0.
+     */
     private void fixMotion() {
         if (this.set) {
             return;
@@ -186,21 +211,28 @@ public class HitSelect extends Module {
         }
 
         try {
-            // Save the current slowdown value
+            // Save current slowdown
             this.savedSlowdown = keepSprint.slowdown.getValue().doubleValue();
-            
-            // Enable KeepSprint and set slowdown to 0
+
+            // Enable KeepSprint if not already enabled, and track if we toggled it
             if (!keepSprint.isEnabled()) {
                 keepSprint.toggle();
+                this.keepSprintToggled = true;
+            } else {
+                this.keepSprintToggled = false;
             }
+
+            // Set slowdown to 0
             keepSprint.slowdown.setValue(0);
-            
             this.set = true;
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
+    /**
+     * Resets motion by restoring KeepSprint settings.
+     */
     private void resetMotion() {
         if (!this.set) {
             return;
@@ -212,11 +244,11 @@ public class HitSelect extends Module {
         }
 
         try {
-            // Restore the original slowdown value
+            // Restore slowdown
             keepSprint.slowdown.setValue((int) this.savedSlowdown);
-            
-            // Disable KeepSprint if we enabled it
-            if (keepSprint.isEnabled()) {
+
+            // Disable KeepSprint only if we toggled it on
+            if (this.keepSprintToggled && keepSprint.isEnabled()) {
                 keepSprint.toggle();
             }
         } catch (Exception e) {
@@ -224,9 +256,13 @@ public class HitSelect extends Module {
         }
 
         this.set = false;
+        this.keepSprintToggled = false;
         this.savedSlowdown = 0.0;
     }
 
+    /**
+     * Checks if the source entity is moving towards the target within a max angle.
+     */
     private boolean isMovingTowards(EntityLivingBase source, EntityLivingBase target, double maxAngle) {
         Vec3 currentPos = source.getPositionVector();
         Vec3 lastPos = new Vec3(source.lastTickPosX, source.lastTickPosY, source.lastTickPosZ);
@@ -237,7 +273,7 @@ public class HitSelect extends Module {
         double mz = currentPos.zCoord - lastPos.zCoord;
         double movementLength = Math.sqrt(mx * mx + mz * mz);
 
-        // If not moving, return false
+        // Not moving
         if (movementLength == 0.0) {
             return false;
         }
@@ -251,7 +287,7 @@ public class HitSelect extends Module {
         double tz = targetPos.zCoord - currentPos.zCoord;
         double targetLength = Math.sqrt(tx * tx + tz * tz);
 
-        // If target is at same position, return false
+        // Target at same position
         if (targetLength == 0.0) {
             return false;
         }
@@ -260,10 +296,8 @@ public class HitSelect extends Module {
         tx /= targetLength;
         tz /= targetLength;
 
-        // Calculate dot product (cosine of angle between vectors)
+        // Dot product for angle check
         double dotProduct = mx * tx + mz * tz;
-
-        // Check if angle is within threshold
         return dotProduct >= Math.cos(Math.toRadians(maxAngle));
     }
 
@@ -272,6 +306,7 @@ public class HitSelect extends Module {
         this.resetMotion();
         this.sprintState = false;
         this.set = false;
+        this.keepSprintToggled = false;
         this.savedSlowdown = 0.0;
         this.blockedHits = 0;
         this.allowedHits = 0;
